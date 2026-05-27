@@ -18,7 +18,7 @@
         "title": "SmartCommit: Generate Commit Message"
       }
     ]
-},
+  },
   "scripts": {
     "vscode:prepublish": "npm run compile",
     "compile": "tsc -p ./",
@@ -38,6 +38,7 @@
     "typescript-eslint": "^8.56.1"
   },
   "dependencies": {
+    "groq-sdk": "^1.2.0",
     "simple-git": "^3.36.0"
   }
 }
