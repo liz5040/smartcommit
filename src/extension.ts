@@ -21,7 +21,7 @@ export function activate(context: vscode.ExtensionContext) {
         const diff = await git.diff(['--staged']);
 
         if (!diff) {
-            vscode.window.showErrorMessage('No staged files found! Please run git add first.');
+            vscode.window.showErrorMessage('No staged changes found — run git add first');
             return;
         }
 
@@ -30,9 +30,26 @@ export function activate(context: vscode.ExtensionContext) {
 
         // Step 4 — Call Groq API
         try {
-            const groq = new Groq({
-                apiKey: process.env.GROQ_API_KEY || ''
-            });
+            const apiKey = await context.secrets.get('groq-api-key');
+
+			if (!apiKey) {
+				const entered = await vscode.window.showInputBox({
+					prompt: 'Enter your Groq API key to use SmartCommit',
+					password: true,
+					ignoreFocusOut: true,
+					placeHolder: 'gsk_...'
+				});
+				if (!entered) {
+					vscode.window.showErrorMessage('No API key provided!');
+					return;
+				}
+				await context.secrets.store('groq-api-key', entered);
+			}
+
+			const storedKey = await context.secrets.get('groq-api-key');
+			const groq = new Groq({
+				apiKey: storedKey || ''
+			});
 
             const response = await groq.chat.completions.create({
                 model: 'llama-3.3-70b-versatile',
@@ -46,7 +63,8 @@ export function activate(context: vscode.ExtensionContext) {
                         - Maximum 72 characters
                         - Use present tense
                         - Be specific about what changed
-                        - Respond with ONLY the commit message, nothing else`
+                        - Respond with ONLY the commit message
+                        - No asterisks, backticks, or markdown formatting`
                     },
                     {
                         role: 'user',
@@ -55,26 +73,33 @@ export function activate(context: vscode.ExtensionContext) {
                 ]
             });
 
-            // Step 5 — Get the commit message from response
-            const commitMessage = response.choices[0]?.message?.content?.trim();
+            // Step 5 — Get commit message
+            const aiMessage = response.choices[0]?.message?.content?.trim();
 
-            if (!commitMessage) {
+            if (!aiMessage) {
                 vscode.window.showErrorMessage('Groq returned an empty response!');
                 return;
             }
 
-            // Step 6 — Show it in output panel
-            const outputChannel = vscode.window.createOutputChannel('SmartCommit');
-            outputChannel.show();
-            outputChannel.appendLine('--- AI Generated Commit Message ---');
-            outputChannel.appendLine(commitMessage);
-            outputChannel.appendLine('--- End ---');
+            // Step 6 — Show in EDITABLE input box
+            const editedMessage = await vscode.window.showInputBox({
+                prompt: 'Edit your commit message if needed, then press Enter to commit',
+                value: aiMessage,
+                placeHolder: 'Commit message...',
+                ignoreFocusOut: true
+            });
 
-            // Step 7 — Show it as a notification too
-            vscode.window.showInformationMessage(`SmartCommit: ${commitMessage}`);
+            // Step 7 — User cancelled
+            if (editedMessage === undefined) {
+                vscode.window.showInformationMessage('SmartCommit: Commit cancelled.');
+                return;
+            }
+
+            // Step 8 — Show the accepted message
+            vscode.window.showInformationMessage(`SmartCommit ready to commit: "${editedMessage}"`);
 
         } catch (error) {
-            vscode.window.showErrorMessage(`Groq API error: ${error}`);
+            vscode.window.showErrorMessage(`SmartCommit error: ${error}`);
         }
     });
 
