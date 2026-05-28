@@ -95,18 +95,13 @@ export function activate(context: vscode.ExtensionContext) {
                 return;
             }
 
-            // Step 8 — Actually execute the git commit!
-			try {
-				await git.commit(editedMessage);
-				vscode.window.showInformationMessage(`✅ Committed: "${editedMessage}"`);
-			} catch (commitError) {
-				vscode.window.showErrorMessage(`Commit failed: ${commitError}`);
-			}
+            // Step 8 — Show the accepted message
+            vscode.window.showInformationMessage(`SmartCommit ready to commit: "${editedMessage}"`);
 
-					} catch (error) {
-						vscode.window.showErrorMessage(`SmartCommit error: ${error}`);
-					}
-				});
+        } catch (error) {
+            vscode.window.showErrorMessage(`SmartCommit error: ${error}`);
+        }
+    });
 
     context.subscriptions.push(disposable);
 }
