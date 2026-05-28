@@ -1,43 +1,26 @@
+// The module 'vscode' contains the VS Code extensibility API
+// Import the module and reference it with the alias vscode in your code below
 import * as vscode from 'vscode';
-import simpleGit from 'simple-git';
 
+// This method is called when your extension is activated
+// Your extension is activated the very first time the command is executed
 export function activate(context: vscode.ExtensionContext) {
 
-    console.log('SmartCommit is now active!');
+	// Use the console to output diagnostic information (console.log) and errors (console.error)
+	// This line of code will only be executed once when your extension is activated
+	console.log('Congratulations, your extension "smartcommit" is now active!');
 
-    const disposable = vscode.commands.registerCommand('smartcommit.generateCommit', async () => {
-        
-        // Step 1 — Get the current workspace folder
-        const workspaceFolder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-        
-        if (!workspaceFolder) {
-            vscode.window.showErrorMessage('No workspace folder found!');
-            return;
-        }
+	// The command has been defined in the package.json file
+	// Now provide the implementation of the command with registerCommand
+	// The commandId parameter must match the command field in package.json
+	const disposable = vscode.commands.registerCommand('smartcommit.helloWorld', () => {
+		// The code you place here will be executed every time your command is executed
+		// Display a message box to the user
+		vscode.window.showInformationMessage('Hello World from SmartCommit!');
+	});
 
-        // Step 2 — Connect to git in that folder
-        const git = simpleGit(workspaceFolder);
-
-        // Step 3 — Read the staged git diff
-        const diff = await git.diff(['--staged']);
-
-        // Step 4 — Check if anything is staged
-        if (!diff) {
-            vscode.window.showErrorMessage('No staged files found! Please run git add first.');
-            return;
-        }
-
-        // Step 5 — Show the diff in VS Code output panel
-        const outputChannel = vscode.window.createOutputChannel('SmartCommit');
-        outputChannel.show();
-        outputChannel.appendLine('--- Staged Git Diff ---');
-        outputChannel.appendLine(diff);
-        outputChannel.appendLine('--- End of Diff ---');
-
-        vscode.window.showInformationMessage('Git diff read successfully!');
-    });
-
-    context.subscriptions.push(disposable);
+	context.subscriptions.push(disposable);
 }
 
+// This method is called when your extension is deactivated
 export function deactivate() {}
