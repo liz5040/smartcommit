@@ -2,21 +2,179 @@ import * as vscode from 'vscode';
 import simpleGit from 'simple-git';
 import Groq from 'groq-sdk';
 
-export function activate(context: vscode.ExtensionContext) {
+class SmartCommitPanel implements vscode.WebviewViewProvider {
+    private _view?: vscode.WebviewView;
+    private _context: vscode.ExtensionContext;
 
-    console.log('SmartCommit is now active!');
+    constructor(context: vscode.ExtensionContext) {
+        this._context = context;
+    }
 
-    const disposable = vscode.commands.registerCommand('smartcommit.generateCommit', async () => {
+    resolveWebviewView(webviewView: vscode.WebviewView) {
+        this._view = webviewView;
+        webviewView.webview.options = { enableScripts: true };
+        this.refresh();
 
-        // Step 1 — Get workspace folder
+        // Auto refresh when git state changes
+        const watcher = vscode.workspace.createFileSystemWatcher('**/.git/index');
+        watcher.onDidChange(() => this.refresh());
+        watcher.onDidCreate(() => this.refresh());
+        this._context.subscriptions.push(watcher);
+        // Listen for messages from the webview
+        webviewView.webview.onDidReceiveMessage(async (message) => {
+            if (message.command === 'generate') {
+                await this.generateCommit();
+            }
+        });
+    }
+
+    async refresh() {
+        if (!this._view) return;
+
         const workspaceFolder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
 
+        if (!workspaceFolder) {
+            this._view.webview.html = this.getHtml('No workspace open', [], [], 0);
+            return;
+        }
+
+        try {
+            const git = simpleGit(workspaceFolder);
+
+            // Get branch name
+            const branchResult = await git.branch();
+            const branch = branchResult.current;
+
+            // Get staged files
+            const status = await git.status();
+            const stagedFiles = status.staged;
+
+            // Get unstaged count
+            const unstagedCount = status.modified.length + status.not_added.length;
+
+            this._view.webview.html = this.getHtml(branch, stagedFiles, status.staged, unstagedCount);
+        } catch (error) {
+            this._view.webview.html = this.getHtml('No git repo found', [], [], 0);
+        }
+    }
+
+    getHtml(branch: string, stagedFiles: string[], staged: string[], unstagedCount: number) {
+        const fileItems = stagedFiles.map(f => `
+            <div class="file-item">
+                <span class="badge">M</span>
+                <span class="file-name">${f}</span>
+            </div>
+        `).join('');
+
+        return `<!DOCTYPE html>
+        <html>
+        <head>
+            <style>
+                body {
+                    font-family: var(--vscode-font-family);
+                    font-size: var(--vscode-font-size);
+                    color: var(--vscode-foreground);
+                    padding: 12px;
+                    margin: 0;
+                }
+                .section-label {
+                    font-size: 11px;
+                    color: var(--vscode-descriptionForeground);
+                    text-transform: uppercase;
+                    letter-spacing: 0.08em;
+                    margin-bottom: 6px;
+                    margin-top: 14px;
+                }
+                .branch-badge {
+                    background: var(--vscode-badge-background);
+                    color: var(--vscode-badge-foreground);
+                    padding: 3px 10px;
+                    border-radius: 3px;
+                    font-size: 12px;
+                    display: inline-block;
+                    margin-bottom: 4px;
+                }
+                .file-item {
+                    display: flex;
+                    align-items: center;
+                    gap: 8px;
+                    padding: 3px 0;
+                    font-size: 12px;
+                }
+                .badge {
+                    background: #e2c08d;
+                    color: #1e1e1e;
+                    font-size: 10px;
+                    font-weight: bold;
+                    padding: 1px 5px;
+                    border-radius: 3px;
+                    min-width: 14px;
+                    text-align: center;
+                }
+                .file-name {
+                    color: var(--vscode-foreground);
+                }
+                .empty {
+                    color: var(--vscode-descriptionForeground);
+                    font-size: 12px;
+                    font-style: italic;
+                }
+                .unstaged {
+                    color: var(--vscode-descriptionForeground);
+                    font-size: 12px;
+                    margin-top: 4px;
+                }
+                .btn {
+                    background: var(--vscode-button-background);
+                    color: var(--vscode-button-foreground);
+                    border: none;
+                    padding: 6px 14px;
+                    border-radius: 3px;
+                    cursor: pointer;
+                    font-size: 12px;
+                    width: 100%;
+                    margin-top: 14px;
+                }
+                .btn:hover {
+                    background: var(--vscode-button-hoverBackground);
+                }
+                .divider {
+                    border: none;
+                    border-top: 0.5px solid var(--vscode-widget-border);
+                    margin: 12px 0;
+                }
+            </style>
+        </head>
+        <body>
+            <div class="section-label">Branch</div>
+            <div class="branch-badge">⎇ ${branch}</div>
+
+            <hr class="divider"/>
+
+            <div class="section-label">Staged files (${stagedFiles.length})</div>
+            ${stagedFiles.length > 0 ? fileItems : '<div class="empty">No staged files</div>'}
+
+            <div class="unstaged">${unstagedCount} unstaged change${unstagedCount !== 1 ? 's' : ''}</div>
+
+            <button class="btn" onclick="generate()">✦ Generate Commit Message</button>
+
+            <script>
+                const vscode = acquireVsCodeApi();
+                function generate() {
+                    vscode.postMessage({ command: 'generate' });
+                }
+            </script>
+        </body>
+        </html>`;
+    }
+
+    async generateCommit() {
+        const workspaceFolder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
         if (!workspaceFolder) {
             vscode.window.showErrorMessage('No workspace folder found!');
             return;
         }
 
-        // Step 2 — Read staged git diff
         const git = simpleGit(workspaceFolder);
         const diff = await git.diff(['--staged']);
 
@@ -25,31 +183,27 @@ export function activate(context: vscode.ExtensionContext) {
             return;
         }
 
-        // Step 3 — Show loading message
         vscode.window.showInformationMessage('SmartCommit: Generating commit message...');
 
-        // Step 4 — Call Groq API
         try {
-            const apiKey = await context.secrets.get('groq-api-key');
+            let apiKey = await this._context.secrets.get('groq-api-key');
 
-			if (!apiKey) {
-				const entered = await vscode.window.showInputBox({
-					prompt: 'Enter your Groq API key to use SmartCommit',
-					password: true,
-					ignoreFocusOut: true,
-					placeHolder: 'gsk_...'
-				});
-				if (!entered) {
-					vscode.window.showErrorMessage('No API key provided!');
-					return;
-				}
-				await context.secrets.store('groq-api-key', entered);
-			}
+            if (!apiKey) {
+                const entered = await vscode.window.showInputBox({
+                    prompt: 'Enter your Groq API key to use SmartCommit',
+                    password: true,
+                    ignoreFocusOut: true,
+                    placeHolder: 'gsk_...'
+                });
+                if (!entered) {
+                    vscode.window.showErrorMessage('No API key provided!');
+                    return;
+                }
+                await this._context.secrets.store('groq-api-key', entered);
+                apiKey = entered;
+            }
 
-			const storedKey = await context.secrets.get('groq-api-key');
-			const groq = new Groq({
-				apiKey: storedKey || ''
-			});
+            const groq = new Groq({ apiKey });
 
             const response = await groq.chat.completions.create({
                 model: 'llama-3.3-70b-versatile',
@@ -57,7 +211,7 @@ export function activate(context: vscode.ExtensionContext) {
                     {
                         role: 'system',
                         content: `You are a helpful assistant that writes git commit messages.
-                        Given a git diff, write a single concise commit message following 
+                        Given a git diff, write a single concise commit message following
                         Conventional Commits format (feat/fix/chore/docs etc).
                         Rules:
                         - Maximum 72 characters
@@ -73,7 +227,6 @@ export function activate(context: vscode.ExtensionContext) {
                 ]
             });
 
-            // Step 5 — Get commit message
             const aiMessage = response.choices[0]?.message?.content?.trim();
 
             if (!aiMessage) {
@@ -81,7 +234,6 @@ export function activate(context: vscode.ExtensionContext) {
                 return;
             }
 
-            // Step 6 — Show in EDITABLE input box
             const editedMessage = await vscode.window.showInputBox({
                 prompt: 'Edit your commit message if needed, then press Enter to commit',
                 value: aiMessage,
@@ -89,26 +241,38 @@ export function activate(context: vscode.ExtensionContext) {
                 ignoreFocusOut: true
             });
 
-            // Step 7 — User cancelled
             if (editedMessage === undefined) {
                 vscode.window.showInformationMessage('SmartCommit: Commit cancelled.');
                 return;
             }
 
-            // Step 8 — Actually execute the git commit!
-			try {
-				await git.commit(editedMessage);
-				vscode.window.showInformationMessage(`✅ Committed: "${editedMessage}"`);
-			} catch (commitError) {
-				vscode.window.showErrorMessage(`Commit failed: ${commitError}`);
-			}
+            await git.commit(editedMessage);
+            vscode.window.showInformationMessage(`✅ Committed: "${editedMessage}"`);
 
-					} catch (error) {
-						vscode.window.showErrorMessage(`SmartCommit error: ${error}`);
-					}
-				});
+            // Refresh the panel after commit
+            this.refresh();
 
-    context.subscriptions.push(disposable);
+        } catch (error) {
+            vscode.window.showErrorMessage(`SmartCommit error: ${error}`);
+        }
+    }
+}
+
+export function activate(context: vscode.ExtensionContext) {
+    console.log('SmartCommit is now active!');
+
+    const provider = new SmartCommitPanel(context);
+
+    context.subscriptions.push(
+        vscode.window.registerWebviewViewProvider('smartcommit.sidebar', provider)
+    );
+
+    // Register command too
+    context.subscriptions.push(
+        vscode.commands.registerCommand('smartcommit.generateCommit', async () => {
+            await provider.generateCommit();
+        })
+    );
 }
 
 export function deactivate() {}

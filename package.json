@@ -11,14 +11,32 @@
   ],
   "activationEvents": [],
   "main": "./out/extension.js",
-  "contributes": {
+"contributes": {
     "commands": [
-      {
-        "command": "smartcommit.generateCommit",
-        "title": "SmartCommit: Generate Commit Message"
-      }
-    ]
-  },
+        {
+            "command": "smartcommit.generateCommit",
+            "title": "SmartCommit: Generate Commit Message"
+        }
+    ],
+    "viewsContainers": {
+        "activitybar": [
+            {
+                "id": "smartcommit-sidebar",
+                "title": "SmartCommit",
+                "icon": "$(git-commit)"
+            }
+        ]
+    },
+    "views": {
+        "smartcommit-sidebar": [
+            {
+                "type": "webview",
+                "id": "smartcommit.sidebar",
+                "name": "SmartCommit"
+            }
+        ]
+    }
+},
   "scripts": {
     "vscode:prepublish": "npm run compile",
     "compile": "tsc -p ./",
