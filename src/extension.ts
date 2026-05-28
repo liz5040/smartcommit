@@ -198,7 +198,16 @@ class SmartCommitPanel implements vscode.WebviewViewProvider {
             return;
         }
 
-        const git = simpleGit(workspaceFolder);
+        // Check if it's actually a git repo
+        let git;
+        try {
+            git = simpleGit(workspaceFolder);
+            await git.status();
+        } catch (error) {
+            vscode.window.showErrorMessage('No git repository found — open a git repository first');
+            return;
+        }
+
         const diff = await git.diff(['--staged']);
 
         if (!diff) {
@@ -258,9 +267,17 @@ class SmartCommitPanel implements vscode.WebviewViewProvider {
             vscode.window.showInformationMessage(`✅ Committed: "${editedMessage}"`);
             this.refresh();
 
-        } catch (error) {
-            vscode.window.showErrorMessage(`SmartCommit error: ${error}`);
-        }
+       } catch (error: any) {
+            if (error?.status === 429) {
+                vscode.window.showErrorMessage('Rate limit reached — please wait a moment and try again');
+            } else if (error?.code === 'ENOTFOUND' || error?.code === 'ECONNREFUSED') {
+                vscode.window.showErrorMessage('Connection failed — check your internet and try again');
+            } else if (error?.status >= 500) {
+                vscode.window.showErrorMessage('Groq API is unavailable — please try again later');
+            } else {
+                vscode.window.showErrorMessage(`SmartCommit error: ${error}`);
+            }
+}
     }
 
     async generatePR() {
