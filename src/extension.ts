@@ -20,10 +20,14 @@ class SmartCommitPanel implements vscode.WebviewViewProvider {
         watcher.onDidChange(() => this.refresh());
         watcher.onDidCreate(() => this.refresh());
         this._context.subscriptions.push(watcher);
+
         // Listen for messages from the webview
         webviewView.webview.onDidReceiveMessage(async (message) => {
             if (message.command === 'generate') {
                 await this.generateCommit();
+            }
+            if (message.command === 'generatePR') {
+                await this.generatePR();
             }
         });
     }
@@ -34,31 +38,24 @@ class SmartCommitPanel implements vscode.WebviewViewProvider {
         const workspaceFolder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
 
         if (!workspaceFolder) {
-            this._view.webview.html = this.getHtml('No workspace open', [], [], 0);
+            this._view.webview.html = this.getHtml('No workspace open', [], 0);
             return;
         }
 
         try {
             const git = simpleGit(workspaceFolder);
-
-            // Get branch name
             const branchResult = await git.branch();
             const branch = branchResult.current;
-
-            // Get staged files
             const status = await git.status();
             const stagedFiles = status.staged;
-
-            // Get unstaged count
             const unstagedCount = status.modified.length + status.not_added.length;
-
-            this._view.webview.html = this.getHtml(branch, stagedFiles, status.staged, unstagedCount);
+            this._view.webview.html = this.getHtml(branch, stagedFiles, unstagedCount);
         } catch (error) {
-            this._view.webview.html = this.getHtml('No git repo found', [], [], 0);
+            this._view.webview.html = this.getHtml('No git repo found', [], 0);
         }
     }
 
-    getHtml(branch: string, stagedFiles: string[], staged: string[], unstagedCount: number) {
+    getHtml(branch: string, stagedFiles: string[], unstagedCount: number) {
         const fileItems = stagedFiles.map(f => `
             <div class="file-item">
                 <span class="badge">M</span>
@@ -111,9 +108,6 @@ class SmartCommitPanel implements vscode.WebviewViewProvider {
                     min-width: 14px;
                     text-align: center;
                 }
-                .file-name {
-                    color: var(--vscode-foreground);
-                }
                 .empty {
                     color: var(--vscode-descriptionForeground);
                     font-size: 12px;
@@ -133,10 +127,17 @@ class SmartCommitPanel implements vscode.WebviewViewProvider {
                     cursor: pointer;
                     font-size: 12px;
                     width: 100%;
-                    margin-top: 14px;
+                    margin-top: 10px;
                 }
                 .btn:hover {
                     background: var(--vscode-button-hoverBackground);
+                }
+                .btn-secondary {
+                    background: var(--vscode-button-secondaryBackground);
+                    color: var(--vscode-button-secondaryForeground);
+                }
+                .btn-secondary:hover {
+                    background: var(--vscode-button-secondaryHoverBackground);
                 }
                 .divider {
                     border: none;
@@ -153,19 +154,41 @@ class SmartCommitPanel implements vscode.WebviewViewProvider {
 
             <div class="section-label">Staged files (${stagedFiles.length})</div>
             ${stagedFiles.length > 0 ? fileItems : '<div class="empty">No staged files</div>'}
-
             <div class="unstaged">${unstagedCount} unstaged change${unstagedCount !== 1 ? 's' : ''}</div>
 
             <button class="btn" onclick="generate()">✦ Generate Commit Message</button>
+            <button class="btn btn-secondary" onclick="generatePR()">⎇ Generate PR Description</button>
 
             <script>
                 const vscode = acquireVsCodeApi();
                 function generate() {
                     vscode.postMessage({ command: 'generate' });
                 }
+                function generatePR() {
+                    vscode.postMessage({ command: 'generatePR' });
+                }
             </script>
         </body>
         </html>`;
+    }
+
+    async getApiKey(): Promise<string | undefined> {
+        let apiKey = await this._context.secrets.get('groq-api-key');
+        if (!apiKey) {
+            const entered = await vscode.window.showInputBox({
+                prompt: 'Enter your Groq API key to use SmartCommit',
+                password: true,
+                ignoreFocusOut: true,
+                placeHolder: 'gsk_...'
+            });
+            if (!entered) {
+                vscode.window.showErrorMessage('No API key provided!');
+                return undefined;
+            }
+            await this._context.secrets.store('groq-api-key', entered);
+            apiKey = entered;
+        }
+        return apiKey;
     }
 
     async generateCommit() {
@@ -186,22 +209,8 @@ class SmartCommitPanel implements vscode.WebviewViewProvider {
         vscode.window.showInformationMessage('SmartCommit: Generating commit message...');
 
         try {
-            let apiKey = await this._context.secrets.get('groq-api-key');
-
-            if (!apiKey) {
-                const entered = await vscode.window.showInputBox({
-                    prompt: 'Enter your Groq API key to use SmartCommit',
-                    password: true,
-                    ignoreFocusOut: true,
-                    placeHolder: 'gsk_...'
-                });
-                if (!entered) {
-                    vscode.window.showErrorMessage('No API key provided!');
-                    return;
-                }
-                await this._context.secrets.store('groq-api-key', entered);
-                apiKey = entered;
-            }
+            const apiKey = await this.getApiKey();
+            if (!apiKey) return;
 
             const groq = new Groq({ apiKey });
 
@@ -228,7 +237,6 @@ class SmartCommitPanel implements vscode.WebviewViewProvider {
             });
 
             const aiMessage = response.choices[0]?.message?.content?.trim();
-
             if (!aiMessage) {
                 vscode.window.showErrorMessage('Groq returned an empty response!');
                 return;
@@ -248,9 +256,83 @@ class SmartCommitPanel implements vscode.WebviewViewProvider {
 
             await git.commit(editedMessage);
             vscode.window.showInformationMessage(`✅ Committed: "${editedMessage}"`);
-
-            // Refresh the panel after commit
             this.refresh();
+
+        } catch (error) {
+            vscode.window.showErrorMessage(`SmartCommit error: ${error}`);
+        }
+    }
+
+    async generatePR() {
+        const workspaceFolder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+        if (!workspaceFolder) {
+            vscode.window.showErrorMessage('No workspace folder found!');
+            return;
+        }
+
+        try {
+            const git = simpleGit(workspaceFolder);
+
+            // Get current branch
+            const branchResult = await git.branch();
+            const branch = branchResult.current;
+
+            // Get last 10 commits
+            const log = await git.log(['-10']);
+            const commits = log.all.map(c => `- ${c.message}`).join('\n');
+
+            // Get changed files
+            const diff = await git.diff(['main...HEAD', '--name-only']);
+            const changedFiles = diff.split('\n').filter(f => f.trim()).map(f => `- ${f}`).join('\n');
+
+            vscode.window.showInformationMessage('SmartCommit: Generating PR description...');
+
+            const apiKey = await this.getApiKey();
+            if (!apiKey) return;
+
+            const groq = new Groq({ apiKey });
+
+            const response = await groq.chat.completions.create({
+                model: 'llama-3.3-70b-versatile',
+                messages: [
+                    {
+                        role: 'system',
+                        content: `You are a helpful assistant that writes Pull Request descriptions.
+                        Write a professional PR description in Markdown format with these sections:
+                        ## Title
+                        ## Summary
+                        ## Changes
+                        ## Test Notes
+                        Be concise and specific.`
+                    },
+                    {
+                        role: 'user',
+                        content: `Write a PR description for:
+                        Branch: ${branch}
+                        
+                        Recent commits:
+                        ${commits}
+                        
+                        Changed files:
+                        ${changedFiles}`
+                    }
+                ]
+            });
+
+            const prDescription = response.choices[0]?.message?.content?.trim();
+            if (!prDescription) {
+                vscode.window.showErrorMessage('Groq returned an empty response!');
+                return;
+            }
+
+            // Open in new editor tab
+            const doc = await vscode.workspace.openTextDocument({
+                content: prDescription,
+                language: 'markdown'
+            });
+            await vscode.window.showTextDocument(doc);
+
+            vscode.window.showInformationMessage('✅ PR Description generated!');
 
         } catch (error) {
             vscode.window.showErrorMessage(`SmartCommit error: ${error}`);
@@ -267,10 +349,15 @@ export function activate(context: vscode.ExtensionContext) {
         vscode.window.registerWebviewViewProvider('smartcommit.sidebar', provider)
     );
 
-    // Register command too
     context.subscriptions.push(
         vscode.commands.registerCommand('smartcommit.generateCommit', async () => {
             await provider.generateCommit();
+        })
+    );
+
+    context.subscriptions.push(
+        vscode.commands.registerCommand('smartcommit.generatePR', async () => {
+            await provider.generatePR();
         })
     );
 }
