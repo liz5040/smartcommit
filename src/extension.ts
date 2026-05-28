@@ -326,19 +326,29 @@ class SmartCommitPanel implements vscode.WebviewViewProvider {
             }
 
             // Open in new editor tab
+            
             const doc = await vscode.workspace.openTextDocument({
                 content: prDescription,
                 language: 'markdown'
             });
             await vscode.window.showTextDocument(doc);
 
-            vscode.window.showInformationMessage('✅ PR Description generated!');
+            // Copy to clipboard button
+            const action = await vscode.window.showInformationMessage(
+                '✅ PR Description generated!',
+                'Copy to Clipboard'
+            );
 
-        } catch (error) {
-            vscode.window.showErrorMessage(`SmartCommit error: ${error}`);
-        }
-    }
-}
+            if (action === 'Copy to Clipboard') {
+                await vscode.env.clipboard.writeText(prDescription);
+                vscode.window.showInformationMessage('📋 Copied to clipboard!');
+            }
+
+                    } catch (error) {
+                        vscode.window.showErrorMessage(`SmartCommit error: ${error}`);
+                    }
+                }
+            }
 
 export function activate(context: vscode.ExtensionContext) {
     console.log('SmartCommit is now active!');
