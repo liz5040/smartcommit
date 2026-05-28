@@ -13,15 +13,11 @@
   "main": "./out/extension.js",
 "contributes": {
     "commands": [
-    {
-        "command": "smartcommit.generateCommit",
-        "title": "SmartCommit: Generate Commit Message"
-    },
-    {
-        "command": "smartcommit.generatePR",
-        "title": "SmartCommit: Generate PR Description"
-    }
-],
+        {
+            "command": "smartcommit.generateCommit",
+            "title": "SmartCommit: Generate Commit Message"
+        }
+    ],
     "viewsContainers": {
         "activitybar": [
             {
