@@ -229,18 +229,30 @@ class SmartCommitPanel implements vscode.WebviewViewProvider {
                     {
                         role: 'system',
                         content: `You are a helpful assistant that writes git commit messages.
-                        Given a git diff, write a single concise commit message following
-                        Conventional Commits format (feat/fix/chore/docs etc).
+                        You MUST follow the Conventional Commits format exactly.
+                        Format: <type>: <description>
+                        Types: feat, fix, chore, docs, style, refactor, test
+                        Examples:
+                        - feat: add user authentication
+                        - fix: resolve null pointer in login
+                        - chore: update dependencies
+                        - docs: add README setup guide
                         Rules:
-                        - Maximum 72 characters
+                        - MUST start with a type prefix (feat/fix/chore/docs/style/refactor/test)
+                        - MAXIMUM 72 characters total
                         - Use present tense
-                        - Be specific about what changed
-                        - Respond with ONLY the commit message
-                        - No asterisks, backticks, or markdown formatting`
+                        - No asterisks, backticks, or markdown
+                        - Respond with ONLY the commit message, nothing else`
                     },
                     {
                         role: 'user',
-                        content: `Write a commit message for this git diff:\n\n${diff}`
+                        content: `Write a commit message for these changes:
+
+                    Changed files:
+                    ${diff.split('\n').filter((l: string) => l.startsWith('diff --git')).map((l: string) => l.replace('diff --git a/', '').split(' b/')[0]).join('\n')}
+
+                    Git diff:
+                    ${diff.substring(0, 3000)}`
                     }
                 ]
             });
@@ -313,26 +325,29 @@ class SmartCommitPanel implements vscode.WebviewViewProvider {
                 model: 'llama-3.3-70b-versatile',
                 messages: [
                     {
-                        role: 'system',
-                        content: `You are a helpful assistant that writes Pull Request descriptions.
-                        Write a professional PR description in Markdown format with these sections:
-                        ## Title
-                        ## Summary
-                        ## Changes
-                        ## Test Notes
-                        Be concise and specific.`
-                    },
-                    {
-                        role: 'user',
-                        content: `Write a PR description for:
-                        Branch: ${branch}
-                        
-                        Recent commits:
-                        ${commits}
-                        
-                        Changed files:
-                        ${changedFiles}`
-                    }
+                    role: 'system',
+                    content: `You are a helpful assistant that writes Pull Request descriptions.
+                    Write a professional PR description in Markdown format with exactly these sections:
+                    ## Title
+                    ## Summary
+                    ## Changes
+                    ## Test Notes
+                    Be concise and specific. Use bullet points for Changes section.`
+                },
+                {
+                    role: 'user',
+                    content: `Write a PR description for:
+
+                Branch: ${branch}
+
+                Recent commits:
+                ${commits}
+
+                Changed files:
+                ${changedFiles}
+
+                Make sure to include all 4 sections: Title, Summary, Changes, and Test Notes.`
+                }
                 ]
             });
 
