@@ -1,26 +1,37 @@
-// The module 'vscode' contains the VS Code extensibility API
-// Import the module and reference it with the alias vscode in your code below
 import * as vscode from 'vscode';
+import simpleGit from 'simple-git';
 
-// This method is called when your extension is activated
-// Your extension is activated the very first time the command is executed
 export function activate(context: vscode.ExtensionContext) {
 
-	// Use the console to output diagnostic information (console.log) and errors (console.error)
-	// This line of code will only be executed once when your extension is activated
-	console.log('Congratulations, your extension "smartcommit" is now active!');
+    console.log('SmartCommit is now active!');
 
-	// The command has been defined in the package.json file
-	// Now provide the implementation of the command with registerCommand
-	// The commandId parameter must match the command field in package.json
-	const disposable = vscode.commands.registerCommand('smartcommit.helloWorld', () => {
-		// The code you place here will be executed every time your command is executed
-		// Display a message box to the user
-		vscode.window.showInformationMessage('Hello World from SmartCommit!');
-	});
+    const disposable = vscode.commands.registerCommand('smartcommit.generateCommit', async () => {
+        
+        const workspaceFolder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+        
+        if (!workspaceFolder) {
+            vscode.window.showErrorMessage('No workspace folder found!');
+            return;
+        }
 
-	context.subscriptions.push(disposable);
+        const git = simpleGit(workspaceFolder);
+        const diff = await git.diff(['--staged']);
+
+        if (!diff) {
+            vscode.window.showErrorMessage('No staged changes found — run git add first');
+            return;
+        }
+
+        const outputChannel = vscode.window.createOutputChannel('SmartCommit');
+        outputChannel.show();
+        outputChannel.appendLine('--- Staged Git Diff ---');
+        outputChannel.appendLine(diff);
+        outputChannel.appendLine('--- End of Diff ---');
+
+        vscode.window.showInformationMessage('Git diff read successfully!');
+    });
+
+    context.subscriptions.push(disposable);
 }
 
-// This method is called when your extension is deactivated
 export function deactivate() {}
