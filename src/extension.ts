@@ -10,28 +10,33 @@ export function activate(context: vscode.ExtensionContext) {
 
         // Step 1 — Get workspace folder
         const workspaceFolder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-
         if (!workspaceFolder) {
             vscode.window.showErrorMessage('No workspace folder found!');
             return;
         }
 
-        // Step 2 — Read staged git diff
-        const git = simpleGit(workspaceFolder);
-        const diff = await git.diff(['--staged']);
+        // Step 2 — Check git repo
+        let git;
+        try {
+            git = simpleGit(workspaceFolder);
+            await git.status();
+        } catch (error) {
+            vscode.window.showErrorMessage('No git repository found — open a git repository first');
+            return;
+        }
 
+        // Step 3 — Read staged diff
+        const diff = await git.diff(['--staged']);
         if (!diff) {
             vscode.window.showErrorMessage('No staged changes found — run git add first');
             return;
         }
 
-        // Step 3 — Show loading message
         vscode.window.showInformationMessage('SmartCommit: Generating commit message...');
 
-        // Step 4 — Call Groq API
         try {
+            // Step 4 — Get API key
             let apiKey = await context.secrets.get('groq-api-key');
-
             if (!apiKey) {
                 const entered = await vscode.window.showInputBox({
                     prompt: 'Enter your Groq API key to use SmartCommit',
@@ -47,39 +52,38 @@ export function activate(context: vscode.ExtensionContext) {
                 apiKey = entered;
             }
 
+            // Step 5 — Call Groq
             const groq = new Groq({ apiKey });
-
             const response = await groq.chat.completions.create({
                 model: 'llama-3.3-70b-versatile',
                 messages: [
                     {
                         role: 'system',
                         content: `You are a helpful assistant that writes git commit messages.
-                        You MUST follow the Conventional Commits format exactly.
+                        You MUST follow Conventional Commits format exactly.
                         Format: <type>: <description>
                         Types: feat, fix, chore, docs, style, refactor, test
                         Rules:
-                        - MUST start with a type prefix
-                        - MAXIMUM 72 characters total
-                        - Use present tense
+                        - MUST start with type prefix
+                        - MAXIMUM 72 characters
+                        - Present tense
                         - No asterisks, backticks, or markdown
-                        - Respond with ONLY the commit message, nothing else`
+                        - Respond with ONLY the commit message`
                     },
                     {
                         role: 'user',
-                        content: `Write a commit message for this git diff:\n\n${diff.substring(0, 3000)}`
+                        content: `Write a commit message for this diff:\n\n${diff.substring(0, 3000)}`
                     }
                 ]
             });
 
             const aiMessage = response.choices[0]?.message?.content?.trim();
-
             if (!aiMessage) {
                 vscode.window.showErrorMessage('Groq returned an empty response!');
                 return;
             }
 
-            // Step 5 — Show in editable input box
+            // Step 6 — Show editable input box
             const editedMessage = await vscode.window.showInputBox({
                 prompt: 'Edit your commit message if needed, then press Enter to commit',
                 value: aiMessage,
@@ -92,7 +96,7 @@ export function activate(context: vscode.ExtensionContext) {
                 return;
             }
 
-            // Step 6 — Execute git commit
+            // Step 7 — Execute git commit
             await git.commit(editedMessage);
             vscode.window.showInformationMessage(`✅ Committed: "${editedMessage}"`);
 
