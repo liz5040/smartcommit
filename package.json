@@ -13,12 +13,34 @@
   "main": "./out/extension.js",
   "contributes": {
     "commands": [
-      {
-        "command": "smartcommit.helloWorld",
-        "title": "Hello World"
-      }
-    ]
-  },
+        {
+            "command": "smartcommit.generateCommit",
+            "title": "SmartCommit: Generate Commit Message"
+        },
+        {
+            "command": "smartcommit.generatePR",
+            "title": "SmartCommit: Generate PR Description"
+        }
+    ],
+    "viewsContainers": {
+        "activitybar": [
+            {
+                "id": "smartcommit-sidebar",
+                "title": "SmartCommit",
+                "icon": "$(git-commit)"
+            }
+        ]
+    },
+    "views": {
+        "smartcommit-sidebar": [
+            {
+                "type": "webview",
+                "id": "smartcommit.sidebar",
+                "name": "SmartCommit"
+            }
+        ]
+    }
+},
   "scripts": {
     "vscode:prepublish": "npm run compile",
     "compile": "tsc -p ./",
