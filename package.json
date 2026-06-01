@@ -13,11 +13,11 @@
   "main": "./out/extension.js",
   "contributes": {
     "commands": [
-      {
-        "command": "smartcommit.helloWorld",
-        "title": "Hello World"
-      }
-    ]
+    {
+        "command": "smartcommit.generateCommit",
+        "title": "SmartCommit: Generate Commit Message"
+    }
+]
   },
   "scripts": {
     "vscode:prepublish": "npm run compile",
