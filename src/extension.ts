@@ -26,6 +26,9 @@ class SmartCommitPanel implements vscode.WebviewViewProvider {
             if (message.command === 'generate') {
                 await this.generateCommit();
             }
+            if (message.command === 'generate3Options') {
+                await this.generate3Options();
+            }
             if (message.command === 'generatePR') {
                 await this.generatePR();
             }
@@ -155,13 +158,16 @@ class SmartCommitPanel implements vscode.WebviewViewProvider {
             ${stagedFiles.length > 0 ? fileItems : '<div class="empty">No staged files</div>'}
             <div class="unstaged">${unstagedCount} unstaged change${unstagedCount !== 1 ? 's' : ''}</div>
 
-            <button class="btn" onclick="generate()">✦ Generate Commit Message</button>
+           <button class="btn" onclick="generate()">✦ Generate Commit Message</button>
+            <button class="btn btn-secondary" onclick="generate3Options()">⚡ Generate 3 Options</button>
             <button class="btn btn-secondary" onclick="generatePR()">⎇ Generate PR Description</button>
-
             <script>
                 const vscode = acquireVsCodeApi();
                 function generate() {
                     vscode.postMessage({ command: 'generate' });
+                }
+                function generate3Options() {
+                    vscode.postMessage({ command: 'generate3Options' });
                 }
                 function generatePR() {
                     vscode.postMessage({ command: 'generatePR' });
@@ -276,7 +282,108 @@ class SmartCommitPanel implements vscode.WebviewViewProvider {
             }
         }
     }
+    async generate3Options() {
+    const workspaceFolder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+    if (!workspaceFolder) {
+        vscode.window.showErrorMessage('No workspace folder found!');
+        return;
+    }
 
+    let git;
+    try {
+        git = simpleGit(workspaceFolder);
+        await git.status();
+    } catch (error) {
+        vscode.window.showErrorMessage('No git repository found — open a git repository first');
+        return;
+    }
+
+    const diff = await git.diff(['--staged']);
+    if (!diff) {
+        vscode.window.showErrorMessage('No staged changes found — run git add first');
+        return;
+    }
+
+    vscode.window.showInformationMessage('SmartCommit: Generating 3 options...');
+
+    try {
+        const apiKey = await this.getApiKey();
+        if (!apiKey) return;
+
+        const groq = new Groq({ apiKey });
+
+        // Ask Groq for all 3 styles in ONE call
+        const response = await groq.chat.completions.create({
+            model: 'llama-3.3-70b-versatile',
+            messages: [
+                {
+                    role: 'system',
+                    content: `You are a helpful assistant that writes git commit messages.
+                    Generate exactly 3 commit message options in these styles:
+                    1. Conventional: starts with feat:/fix:/chore: prefix, under 72 chars
+                    2. Short: simple imperative, no prefix, under 50 chars
+                    3. Descriptive: full sentence explaining what and why, under 72 chars
+                    
+                    Respond ONLY in this exact format:
+                    CONVENTIONAL: <message>
+                    SHORT: <message>
+                    DESCRIPTIVE: <message>`
+                },
+                {
+                    role: 'user',
+                    content: `Generate 3 commit message options for this diff:\n\n${diff.substring(0, 3000)}`
+                }
+            ]
+        });
+
+        const raw = response.choices[0]?.message?.content?.trim();
+        if (!raw) {
+            vscode.window.showErrorMessage('Groq returned an empty response!');
+            return;
+        }
+
+        // Parse the 3 options
+        const lines = raw.split('\n').filter((l: string) => l.trim());
+        const conventional = lines.find((l: string) => l.startsWith('CONVENTIONAL:'))?.replace('CONVENTIONAL:', '').trim() || '';
+        const short = lines.find((l: string) => l.startsWith('SHORT:'))?.replace('SHORT:', '').trim() || '';
+        const descriptive = lines.find((l: string) => l.startsWith('DESCRIPTIVE:'))?.replace('DESCRIPTIVE:', '').trim() || '';
+
+        if (!conventional || !short || !descriptive) {
+            vscode.window.showErrorMessage('Could not parse 3 options — please try again');
+            return;
+        }
+
+        // Show QuickPick dropdown
+        const selected = await vscode.window.showQuickPick(
+            [
+                { label: conventional, description: 'Conventional Commits' },
+                { label: short, description: 'Short Imperative' },
+                { label: descriptive, description: 'Descriptive' }
+            ],
+            {
+                placeHolder: 'Pick a commit message style',
+                title: 'SmartCommit — Choose your commit message'
+            }
+        );
+
+        if (!selected) {
+            vscode.window.showInformationMessage('SmartCommit: Cancelled.');
+            return;
+        }
+
+        // Commit with selected message
+        await git.commit(selected.label);
+        vscode.window.showInformationMessage(`✅ Committed: "${selected.label}"`);
+        this.refresh();
+
+    } catch (error: any) {
+        if (error?.status === 429) {
+            vscode.window.showErrorMessage('Rate limit reached — please wait a moment and try again');
+        } else {
+            vscode.window.showErrorMessage(`SmartCommit error: ${error}`);
+        }
+    }
+}
     async generatePR() {
         const workspaceFolder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
         if (!workspaceFolder) {
@@ -369,6 +476,11 @@ export function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(
         vscode.commands.registerCommand('smartcommit.generatePR', async () => {
             await provider.generatePR();
+        })
+    );
+    context.subscriptions.push(
+        vscode.commands.registerCommand('smartcommit.generate3Options', async () => {
+            await provider.generate3Options();
         })
     );
 }
